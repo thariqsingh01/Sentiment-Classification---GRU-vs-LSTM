@@ -1,0 +1,251 @@
+#Importing the Corpus
+
+import pandas as pd
+import csv
+
+#Importing the corpus and dropping empty lines
+corpus = pd.read_csv("sentiment_dataset.csv",sep=',',quoting=csv.QUOTE_NONE,on_bad_lines='skip', header=None, encoding='latin-1',names = ["target","ids","date","flag","flag2","user","text"])
+corpus = corpus.dropna()
+corpus
+
+#Preprocessing the Data
+
+import pandas as pd
+import re
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+import nltk
+from nltk.corpus import stopwords
+nltk.download('stopwords')
+import gensim.downloader as api
+import numpy as np
+from sklearn.model_selection import train_test_split
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+from sklearn import preprocessing
+import tensorflow as tf
+from tensorflow.keras import metrics
+from tensorflow.keras.optimizers import Adam
+
+
+# Load Word2Vec model
+word_vectors = api.load("word2vec-google-news-300")
+
+# Drop irrelevant columns
+corpus = corpus.drop(columns=["ids", "date", "flag","flag2", "user"])
+
+# Convert target labels
+corpus['target'] = corpus['target'].replace({0: 0, 4: 1})
+
+# Clean the text data
+def clean_text(text):
+    # Remove URLs
+    text = re.sub(r'http\S+', '', text)
+    # Remove punctuation
+    text = re.sub(r'[^\w\s]', '', text)
+    # Convert to lowercase
+    text = text.lower()
+    return text
+
+corpus["text"] = corpus["text"].apply(clean_text)
+
+# Tokenization
+max_words = 1000
+max_len = 100
+
+tokenizer = Tokenizer(num_words=max_words)
+tokenizer.fit_on_texts(corpus['text'])
+
+# Convert text to sequences
+sequences = tokenizer.texts_to_sequences(corpus['text'])
+
+# Pad sequences to ensure uniform length
+x = pad_sequences(sequences, maxlen=max_len)
+
+# Get the English stopwords list
+stop_words = set(stopwords.words('english'))
+
+# Function to remove stop words from sequences
+def remove_stopwords(sequence):
+    return [word for word in sequence if word not in stop_words]
+
+# Remove stop words from sequences
+x_no_stopwords = [remove_stopwords(sequence) for sequence in sequences]
+
+# Function to convert a sequence of words to word embeddings
+def sequence_to_sequence_embeddings(sequence, word_vectors):
+    embeddings = []
+    for word in sequence:
+        if word in word_vectors.key_to_index:
+            embeddings.append(word_vectors[word])
+    if embeddings:
+        return np.array(embeddings)
+    else:
+        return np.zeros((1, word_vectors.vector_size))
+
+# Convert sequences without stop words to sequence embeddings (concatenated)
+x_sequence_embeddings = np.array([sequence_to_sequence_embeddings(sequence, word_vectors) for sequence in x_no_stopwords])
+
+# Concatenate word embeddings for each sequence
+x_sequence_embeddings_concat = np.array([np.concatenate(embeddings, axis=0) for embeddings in x_sequence_embeddings])
+
+# Alternatively, you can also try averaging word embeddings for each sequence
+x_sequence_embeddings_avg = np.array([np.mean(embeddings, axis=0) for embeddings in x_sequence_embeddings if len(embeddings) > 0])
+
+# Split the data into training and testing sets
+y = corpus['target'].values
+
+# Label encoding
+label_encoder = preprocessing.LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)
+
+#Long Short Term Memory(LSTM)
+
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
+from sklearn.metrics import f1_score
+from keras.metrics import Precision, Recall
+from keras import backend as K
+import numpy as np
+import tensorflow as tf
+
+x_train, x_test, y_train, y_test = train_test_split(x_sequence_embeddings_concat, y_encoded, test_size=0.2, random_state=42)
+x_train = np.expand_dims(x_train, axis=1)
+
+# Define the LSTM model
+model = Sequential()
+model.add(LSTM(128, input_shape=(x_train.shape[1], x_train.shape[2]), return_sequences=True))
+model.add(Dropout(0.5))
+model.add(LSTM(64))
+model.add(Dropout(0.5))
+model.add(Dense(32, activation='relu'))
+model.add(Dense(1, activation='sigmoid'))
+
+# Compile the model
+def precision(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    precision = true_positives / (predicted_positives + K.epsilon())
+    return precision
+
+def recall(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+    recall = true_positives / (possible_positives + K.epsilon())
+    return recall
+
+def f1_metric(y_true, y_pred):
+    p = precision(y_true, y_pred)
+    r = recall(y_true, y_pred)
+    return 2 * ((p * r) / (p + r + K.epsilon()))
+
+
+model.compile(optimizer="adam", loss='binary_crossentropy', metrics=['accuracy', Precision(), Recall(), f1_metric])
+
+# Train the model
+history = model.fit(x_train, y_train, epochs=5, batch_size=32, validation_split=0.2)
+x_test_reshaped = np.expand_dims(x_test, axis=1)
+
+# Evaluate the model on test data
+results = model.evaluate(x_test_reshaped, y_test)
+print("Test Loss:", results[0])
+print("Test Accuracy:", results[1])
+
+# Get predictions on test data
+y_pred_prob = model.predict(x_test_reshaped)
+y_pred = (y_pred_prob > 0.5).astype(int)
+accuracy = accuracy_score(y_test,y_pred)
+print("Accuracy:", accuracy)
+precision = precision_score(y_test,y_pred, average='weighted')
+print("Precision:",precision)
+recall = recall_score(y_test,y_pred, average='weighted')
+print("Recall Score:",recall)
+f1 = f1_score(y_test,y_pred)
+print("F1 Score:",f1)
+
+#Gated Recurrent Unit(GRU)
+
+from keras.layers import GRU
+import pandas as pd
+import re
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+import nltk
+from nltk.corpus import stopwords
+nltk.download('stopwords')
+import gensim.downloader as api
+import numpy as np
+from sklearn.model_selection import train_test_split
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+from sklearn import preprocessing
+import tensorflow as tf
+from tensorflow.keras import metrics
+from tensorflow.keras.optimizers import Adam
+from keras.metrics import Precision, Recall
+from keras import backend as K
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
+from sklearn.metrics import f1_score
+
+x_train, x_test, y_train, y_test = train_test_split(x_sequence_embeddings_concat, y_encoded, test_size=0.2, random_state=42)
+x_train = np.expand_dims(x_train, axis=1)
+
+# Define the GRU model
+model = Sequential()
+model.add(GRU(128, input_shape=(x_train.shape[1], x_train.shape[2]), return_sequences=True))
+model.add(Dropout(0.5))
+model.add(GRU(64))
+model.add(Dropout(0.5))
+model.add(Dense(32, activation='relu'))
+model.add(Dense(1, activation='sigmoid'))
+
+# Compile the model
+model.compile(optimizer="adam", loss='binary_crossentropy', metrics=['accuracy'])
+
+# Train the model
+x_test = x_test.reshape(x_test.shape[0], 1, x_test.shape[1])
+
+# Evaluate the model on test data
+def precision(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    precision = true_positives / (predicted_positives + K.epsilon())
+    return precision
+
+def recall(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+    recall = true_positives / (possible_positives + K.epsilon())
+    return recall
+
+def f1_metric(y_true, y_pred):
+    p = precision(y_true, y_pred)
+    r = recall(y_true, y_pred)
+    return 2 * ((p * r) / (p + r + K.epsilon()))
+
+
+model.compile(optimizer="adam", loss='binary_crossentropy', metrics=['accuracy', Precision(), Recall(), f1_metric])
+
+# Train the model
+history = model.fit(x_train, y_train, epochs=5, batch_size=32, validation_split=0.2)
+x_test_reshaped = x_test.reshape(x_test.shape[0], 1, x_test.shape[2])
+
+# Evaluate the model on test data
+results = model.evaluate(x_test_reshaped, y_test)
+print("Test Loss:", results[0])
+print("Test Accuracy:", results[1])
+
+# Get predictions on test data
+y_pred_prob = model.predict(x_test_reshaped)
+y_pred = (y_pred_prob > 0.5).astype(int)
+accuracy = accuracy_score(y_test,y_pred)
+print("Accuracy:", accuracy)
+precision = precision_score(y_test,y_pred, average='weighted')
+print("Precision:",precision)
+recall = recall_score(y_test,y_pred, average='weighted')
+print("Recall Score:",recall)
+f1 = f1_score(y_test,y_pred)
+print("F1 Score:",f1)
